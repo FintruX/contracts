@@ -1,9 +1,7 @@
 pragma solidity ^0.4.18;
 
-
 import './ERC20Basic.sol';
 import './math/SafeMath.sol';
-
 
 /**
  * @title Basic token
@@ -39,5 +37,4 @@ contract BasicToken is ERC20Basic {
   function balanceOf(address _owner) public view returns (uint256 balance) {
     return balances[_owner];
   }
-
 }
