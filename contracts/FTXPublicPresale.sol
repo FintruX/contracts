@@ -32,7 +32,7 @@ contract FTXPublicPresale is Ownable, Pausable, HasNoTokens {
     uint256 public constant PRESALE_RATE = 1650;                                    // presale price is 1 ETH to 1,650 FTX
     uint256 public constant SOFTCAP_RATE = 1575;                                    // presale price becomes 1 ETH to 1,575 FTX after softcap is reached
     uint256 public constant TOKEN_HARD_CAP = 75000000 * 10**18;                     // hardcap is 75% of all tokens
-    uint256 public constant MIN_PURCHASE = 10**17;                                  // minimum purchase is 0.1 ETH to make the gas worthwhile
+    uint256 public constant MIN_PURCHASE = 0.1 * 10**18;                            // minimum purchase is 0.1 ETH to make the gas worthwhile
     uint256 public constant MIN_FTX_PURCHASE = 150 * 10**18;                        // minimum token purchase is 150 or 0.1 ETH
 
     uint256 public presaleWeiRaised = 0;                                            // amount of Ether raised in presales in wei
@@ -163,7 +163,6 @@ contract FTXPublicPresale is Ownable, Pausable, HasNoTokens {
             purchaserCount++;                                                       // count new purchasers
             purchasers.push(msg.sender);
         }
-        tokenAmountOf[owner] = tokenAmountOf[owner].sub(ftx);                           // deduct FTX from Fintrux account
         tokenAmountOf[msg.sender] = tokenAmountOf[msg.sender].add(ftx);                 // record FTX on purchaser account
         purchasedAmountOf[msg.sender] = purchasedAmountOf[msg.sender].add(paidValue);   // record ETH paid
         weiRaised += paidValue;                                                         // total ETH raised
