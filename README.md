@@ -4,9 +4,6 @@ Making unsecured loans highly secure. FintruX enables borrowers to create their 
 ## Table of Contents
 
 - [Token](#token)
-- [Presale](#presale)
-- [Token Sale](#crowdsale)
-- [Bonus Tiers](#bonus-tiers)
 
 ## Token
 The FTX Token is used to power the FintruX Network and works as a means to reward or get rewarded for participation in the marketplace. Each activity on the platform has an associated cost specified in FTX (“or ꭍ”). In particular, if FTX goes up in value, the insurance provided by the over and cross-collateralization pools will cover potential credit/default losses. 
