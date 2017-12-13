@@ -9,7 +9,7 @@ contract FTXPrivatePresale is Ownable, Pausable, HasNoTokens {
     using SafeMath for uint256;
 
     string public constant NAME = "FintruX PrivatePresale";
-    string public constant VERSION = "0.5";
+    string public constant VERSION = "0.6";
 
     uint256 public privateStartDate = 1513270800;                                   // Dec 14, 2017 5:00 PM UTC
     uint256 public privateEndDate = 1515258000;                                     // Jan 6, 2018 5:00 PM UTC
@@ -62,11 +62,10 @@ contract FTXPrivatePresale is Ownable, Pausable, HasNoTokens {
     */
     function addToWhitelist(address buyer) external onlyOwner {
         require(buyer != address(0));
+        require(!isWhitelisted(buyer));
         
-        if (!isWhitelisted(buyer)) {
-            whitelist[buyer] = true;
-            numWhitelisted += 1;
-        }
+        whitelist[buyer] = true;
+        numWhitelisted += 1;
     }
 
     /*
@@ -75,11 +74,9 @@ contract FTXPrivatePresale is Ownable, Pausable, HasNoTokens {
     function delFrWhitelist(address buyer) external onlyOwner {
         require(buyer != address(0));                                               // Valid address
         require(tokenAmountOf[buyer] <= 0);                                         // No token purchase yet.
-
-        if (isWhitelisted(buyer)) {
-            delete whitelist[buyer];
-            numWhitelisted -= 1;
-        }
+        require(whitelist[buyer]);
+        delete whitelist[buyer];
+        numWhitelisted -= 1;
     }
     
     // return true if buyer is whitelisted
@@ -103,7 +100,7 @@ contract FTXPrivatePresale is Ownable, Pausable, HasNoTokens {
     }
 
     /*
-        buy token via fiat currency.
+        buy token via fiat currency or crypto.
     */
     function payableInFiatEth(address buyer, uint256 ftx) external onlyOwner {
         require(isPrivatePresale());                                                // Only contribute during private presale

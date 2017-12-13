@@ -10,7 +10,7 @@ contract FTXPublicPresale is Ownable, Pausable, HasNoTokens {
     using SafeMath for uint256;
 
     string public constant NAME = "FintruX PublicPresale";
-    string public constant VERSION = "0.5";
+    string public constant VERSION = "0.6";
 
     FTXPrivatePresale privatePresale;
 
@@ -53,8 +53,6 @@ contract FTXPublicPresale is Ownable, Pausable, HasNoTokens {
     // list of addresses that can purchase
     mapping (address => bool) public whitelist;
 
-    // contract creation time
-    uint private contractTimestamp;
     /**
     * event for token purchase logging
     * @param purchaser who paid for the tokens
@@ -80,7 +78,6 @@ contract FTXPublicPresale is Ownable, Pausable, HasNoTokens {
         purchaserCount = privatePresale.purchaserCount();                           // initialize to all presales purchaser count
         tokensSold = privatePresaleFTXSold;                                         // initialize to FTX sold in private presale
         numWhitelisted = privatePresale.numWhitelisted();
-        contractTimestamp = block.timestamp;
     }
     
     /*
@@ -96,11 +93,10 @@ contract FTXPublicPresale is Ownable, Pausable, HasNoTokens {
     */
     function addToWhitelist(address buyer) external onlyOwner {
         require(buyer != address(0));
+        require(!isWhitelisted(buyer));
         
-        if (!isWhitelisted(buyer)) {
-            whitelist[buyer] = true;
-            numWhitelisted += 1;
-        }
+        whitelist[buyer] = true;
+        numWhitelisted += 1;
     }
 
     /*
@@ -109,11 +105,10 @@ contract FTXPublicPresale is Ownable, Pausable, HasNoTokens {
     function delFrWhitelist(address buyer) external onlyOwner {
         require(buyer != address(0));                                               // Valid address
         require(tokenAmountOf[buyer] <= 0);                                         // No purchase yet in the round.
+        require(whitelist[buyer]);
 
-        if (whitelist[buyer]) {
-            delete whitelist[buyer];
-            numWhitelisted -= 1;
-        }
+        delete whitelist[buyer];
+        numWhitelisted -= 1;
     }
     
     // return true if buyer is whitelisted
@@ -215,17 +210,10 @@ contract FTXPublicPresale is Ownable, Pausable, HasNoTokens {
     function finalize() public onlyOwner {
         require(!isFinalized);                                                      // do nothing if finalized
         require(hasEnded());                                                        // sales ended
+        isFinalized = true;                                                         // mark as finalized
         FINTRUX_WALLET.transfer(this.balance);                                      // transfer to FintruX multisig wallet
         FundsTransferred();                                                         // signal the event for communication
-        isFinalized = true;                                                         // mark as finalized
         Finalized();                                                                // signal the event for communication
-    }
-
-    /* recovery option if things go wrong, only available after 2 years of contract deployment */
-    function recoveryEth(address beneficiary) public onlyOwner {
-        require(beneficiary != address(0));
-        require(now > contractTimestamp + 2 years);
-        beneficiary.transfer(this.balance);
     }
 
     /*

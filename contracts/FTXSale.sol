@@ -12,7 +12,7 @@ contract FTXSale is Ownable, Pausable, HasNoTokens {
     using SafeMath for uint256;
 
     string public constant NAME = "FintruX token sale";
-    string public constant VERSION = "0.5";
+    string public constant VERSION = "0.6";
 
     FTXToken token;
     FTXPrivatePresale privatePresale;
@@ -72,8 +72,7 @@ contract FTXSale is Ownable, Pausable, HasNoTokens {
     // list of addresses that can purchase
     mapping (address => bool) public whitelist;
 
-    // contract creation time
-    uint private contractTimestamp;
+    uint256 public contractTimestamp;
     /**
     * event for token purchase logging
     * @param purchaser who paid for the tokens
@@ -98,7 +97,7 @@ contract FTXSale is Ownable, Pausable, HasNoTokens {
         require(_owner != address(0));                
         token = FTXToken(_token);
         owner = _owner;                                                             // default owner
-
+ 
         privatePresale = FTXPrivatePresale(_privatePresale);
         publicPresale = FTXPublicPresale(_publicPresale);
         presaleTokensSold = publicPresale.presaleTokensSold();                      // initialize to number of FTX sold in all presales
@@ -106,11 +105,13 @@ contract FTXSale is Ownable, Pausable, HasNoTokens {
         tokensSold = presaleTokensSold;                                             // initialize to FTX sold in all presales
         numWhitelisted = publicPresale.numWhitelisted();
         // bonus tiers
+
         tokenDiscount[0] = TokenDiscount(3150000 * 10**18, 0, 1575);                // 5.0% bonus
         tokenDiscount[1] = TokenDiscount(5383000 * 10**18, 0, 1538);                // 2.5% bonus
         tokenDiscount[2] = TokenDiscount(10626000 * 10**18, 0, 1518);               // 1.2% bonus
         tokenDiscount[3] = TokenDiscount(18108000 * 10**18, 0, 1509);               // 0.6% bonus
         tokenDiscount[4] = TokenDiscount(37733000 * 10**18, 0, 1500);               // base price
+
         contractTimestamp = block.timestamp;
     }
     
@@ -127,11 +128,10 @@ contract FTXSale is Ownable, Pausable, HasNoTokens {
     */
     function addToWhitelist(address buyer) external onlyOwner {
         require(buyer != address(0));
-        
-        if (!isWhitelisted(buyer)) {
-            whitelist[buyer] = true;
-            numWhitelisted += 1;
-        }
+        require(!isWhitelisted(buyer));
+
+        whitelist[buyer] = true;
+        numWhitelisted += 1;
     }
 
     /*
@@ -140,11 +140,10 @@ contract FTXSale is Ownable, Pausable, HasNoTokens {
     function delFrWhitelist(address buyer) external onlyOwner {
         require(buyer != address(0));                                               // Valid address
         require(purchasedAmountOf[buyer] <= 0);                                     // No purchase yet.
+        require(whitelist[buyer]);
 
-        if (whitelist[buyer]) {
-            delete whitelist[buyer];
-            numWhitelisted -= 1;
-        }
+        delete whitelist[buyer];
+        numWhitelisted -= 1;
     }
     
     // return true if buyer is whitelisted
@@ -215,6 +214,7 @@ contract FTXSale is Ownable, Pausable, HasNoTokens {
     */
     function () payable public whenNotPaused {
         require(msg.sender != address(0));                                          // stop if address not valid
+        require(isCrowdsale());                                                     // stop if not in sales period
         require(!hasSoldOut());                                                     // stop if no more token to sell
         require(msg.value >= MIN_PURCHASE);                                         // stop if the purchase is too small
         require(isWhitelisted(msg.sender));                                         // no purchase unless whitelisted
@@ -263,11 +263,11 @@ contract FTXSale is Ownable, Pausable, HasNoTokens {
     function finalize() public onlyOwner {
         require(!isFinalized);                                                      // do nothing if finalized
         require(hasEnded());                                                        // crowdsale must have ended
-        if (isMinimumGoalReached()) {
+        isFinalized = true;                                                         // mark as finalized
+        if (isMinimumGoalReached()) {                                               // goal reach or recovery time passed
             FINTRUX_WALLET.transfer(this.balance);                                  // transfer to FintruX multisig wallet
             FundsTransferred();                                                     // signal the event for communication
         }
-        isFinalized = true;                                                         // mark as finalized
         Finalized();                                                                // signal the event for communication
     }
 
@@ -277,7 +277,7 @@ contract FTXSale is Ownable, Pausable, HasNoTokens {
     function claimRefund() external {
         require(isFinalized && !isMinimumGoalReached());                            // cannot refund unless authorized
         require(!purchaserRefunded[msg.sender]);                                    // can only done once which included all three
-        uint256 depositedValue = purchasedAmountOf[msg.sender] + publicPresale.purchasedAmountOf(msg.sender); // ETH to refund
+        uint256 depositedValue = purchasedAmountOf[msg.sender];                     // ETH to refund(only crowdsale portion)
         purchaserRefunded[msg.sender] = true;                                       // assume all refunded(including prior sales), only this is trusted AFTER refund
         // transfer must be called only after purchasedAmountOf is updated to prevent reentrancy attack.
         msg.sender.transfer(depositedValue);                                        // refund all ETH
@@ -364,12 +364,6 @@ contract FTXSale is Ownable, Pausable, HasNoTokens {
         }
     }
 
-    /* recovery option if things go wrong, only available after 2 years of contract deployment and by owner */
-    function recoveryEth(address beneficiary) public onlyOwner {
-        require(beneficiary != address(0));
-        require(now > contractTimestamp + 2 years);
-        beneficiary.transfer(this.balance);
-    }
     /*
         Corwdsale Dapp calls these helper functions.
     */
