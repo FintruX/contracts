@@ -277,7 +277,7 @@ contract FTXSale is Ownable, Pausable, HasNoTokens {
     function claimRefund() external {
         require(isFinalized && !isMinimumGoalReached());                            // cannot refund unless authorized
         require(!purchaserRefunded[msg.sender]);                                    // can only done once which included all three
-        uint256 depositedValue = purchasedAmountOf[msg.sender];                     // ETH to refund(only crowdsale portion)
+        uint256 depositedValue = purchasedAmountOf[msg.sender] + publicPresale.purchasedAmountOf(msg.sender); // ETH to refund(both public presale and crowd sale)
         purchaserRefunded[msg.sender] = true;                                       // assume all refunded(including prior sales), only this is trusted AFTER refund
         // transfer must be called only after purchasedAmountOf is updated to prevent reentrancy attack.
         msg.sender.transfer(depositedValue);                                        // refund all ETH
