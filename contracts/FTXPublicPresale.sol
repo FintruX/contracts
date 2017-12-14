@@ -70,6 +70,9 @@ contract FTXPublicPresale is Ownable, Pausable, HasNoTokens {
         Constructor to initialize everything.
     */
     function FTXPublicPresale (address _privatePresale, address _owner) public {
+        if (_owner == address(0)) {
+            _owner = msg.sender;
+        }
         require(_owner != address(0));
         owner = _owner;                                                             // default owner
         privatePresale = FTXPrivatePresale(_privatePresale);
