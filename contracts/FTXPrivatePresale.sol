@@ -38,7 +38,9 @@ contract FTXPrivatePresale is Ownable, Pausable, HasNoTokens {
     * @param amount amount of tokens purchased
     */ 
     event TokenPurchase(address indexed purchaser, uint256 value, uint256 amount);
-    
+
+    event TokenPurchaseCancelled(address indexed purchaser, uint256 value, uint256 amount);
+
     event Finalized();                                                              // event logging for token sale finalized
 
     /*
@@ -99,7 +101,7 @@ contract FTXPrivatePresale is Ownable, Pausable, HasNoTokens {
         tokenAmountOf[buyer] = tokenAmountOf[buyer].add(ftx);                       // record FTX on purchaser account
         // do not record ETH/Fiat paid:
         tokensSold += ftx;                                                          // total FTX sold
-        TokenPurchase(buyer, msg.value, ftx);                                       // signal the event for communication
+        TokenPurchase(buyer, 0, ftx);                                               // signal the event for communication
     }
 
     /*
@@ -113,6 +115,12 @@ contract FTXPrivatePresale is Ownable, Pausable, HasNoTokens {
         processSale(buyer, ftx);                                                    // do private presale in fiat/ETH
     }
 
+    function cancelTokenPurchase(address buyer) external onlyOwner {
+        require(tokenAmountOf[buyer] > 0);
+        uint256 ftx = tokenAmountOf[buyer];
+        delete tokenAmountOf[buyer];
+        TokenPurchaseCancelled(buyer, 0, ftx);                                       // signal the event for communication
+    }
     /*
         Check to see if this is private presale.
     */
