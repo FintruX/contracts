@@ -7,8 +7,8 @@ contract FTXToken is StandardToken, Ownable {
 
     /* metadata */
     string public constant NAME = "Fincoin";
-    string public constant SYMBOL = "ꭍ";
-    string public constant VERSION = "0.4";
+    string public constant SYMBOL = "FTX";
+    string public constant VERSION = "0.5";
     uint8 public constant DECIMALS = 18;
 
     /* all accounts in wei */
@@ -18,9 +18,9 @@ contract FTXToken is StandardToken, Ownable {
     uint256 public constant TEAM_RESERVE_FTX = 10000000 * 10**18;
 
     // these three multi-sig addresses will be replaced on production:
-    address public constant FINTRUX_RESERVE = 0x044F27F79FAa825bb8F56523Bf53B49a5768B852;
-    address public constant CROSS_RESERVE = 0x4BbFBE461b587434F4FA902fAED2A170C28c5cDA;
-    address public constant TEAM_RESERVE = 0xDe8AAB537974045860cAfecC5aa0CC7a055aaEc4;
+    address public constant FINTRUX_RESERVE = 0x70e17532cfdA24839Aa31b66fe97Ac85871a4939;
+    address public constant CROSS_RESERVE = 0x9Ed8632e7Ba835f9D7b0019546521A514bEa6576;
+    address public constant TEAM_RESERVE = 0xc1831b603914468467FA70B14456c4b8572C18E8;
 
     // assuming Feb 28, 2018 5:00 PM UTC(1519837200) + 1 year, may change for production; 
     uint256 public constant VESTING_DATE = 1519837200 + 1 years;
@@ -32,6 +32,11 @@ contract FTXToken is StandardToken, Ownable {
     // minimum wei required in an account to perform an action (avg gas price 4Gwei * avg gas limit 80000).
     uint256 public minGas4Accts = 80000*4*10**9;
     
+    // list of addresses that has transfer restriction.
+    mapping (address => bool) public accreditedList;
+    uint256 public NumOfAccredited = 0;
+    uint256 public ipoDate = 1703543589;                                          // Assume many years for now but can change.
+
     event Withdraw(address indexed from, address indexed to, uint256 value);
     event GasRebateFailed(address indexed to, uint256 value);
 
@@ -67,6 +72,39 @@ contract FTXToken is StandardToken, Ownable {
             }
         }
         return true;
+    }
+    
+    /*
+        Allow changes to IPO date.
+    */
+    function setIpoDate(uint256 newIpoDate) public onlyOwner {
+        ipoDate = newIpoDate;
+    }
+
+    /*
+        add the ether address to accredited list to put in transfer restrction.
+    */
+    function addToAccreditedList(address _addr) external onlyOwner {
+        require(_addr != address(0));
+        require(!accreditedList[_addr]);
+
+        accreditedList[_addr] = true;
+        NumOfAccredited += 1;
+    }
+
+    /*
+        remove the ether address from accredited list to remove transfer restriction.
+    */
+    function delFrAccreditedList(address _addr) external onlyOwner {
+        require(accreditedList[_addr]);
+
+        delete accreditedList[_addr];
+        NumOfAccredited -= 1;
+    }
+    
+    // return true if buyer is an accredited investor from United States.
+    function isAccreditedlisted(address buyer) public view returns (bool) {
+        return accreditedList[buyer];
     }
 
     /* When necessary, adjust minimum FTX to transfer to make the gas worthwhile */
@@ -105,6 +143,8 @@ contract FTXToken is StandardToken, Ownable {
     function canTransferTokens() internal view returns (bool) {
         if (msg.sender == TEAM_RESERVE) {
             return now >= VESTING_DATE;
+        } else if (accreditedList[msg.sender]) {
+            return now >= ipoDate;
         } else {
             return true;
         }

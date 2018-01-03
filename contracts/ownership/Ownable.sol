@@ -8,8 +8,8 @@ pragma solidity ^0.4.18;
  * https://github.com/OpenZeppelin/zeppelin-solidity/
  */
 contract Ownable {
-  address public owner;
-
+  address public owner;                                                     // Operational owner.
+  address public masterOwner = 0x5D1EC7558C8D1c40406913ab5dbC0Abf1C96BA42;  // for ownership transfer segregation of duty, hard coded to wallet account
 
   event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
 
@@ -36,8 +36,9 @@ contract Ownable {
    * @dev Allows the current owner to transfer control of the contract to a newOwner.
    * @param newOwner The address to transfer ownership to.
    */
-  function transferOwnership(address newOwner) public onlyOwner {
+  function transferOwnership(address newOwner) public {
     require(newOwner != address(0));
+    require(masterOwner == msg.sender); // only master owner can initiate change to ownershipe
     OwnershipTransferred(owner, newOwner);
     owner = newOwner;
   }

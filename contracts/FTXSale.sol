@@ -1,25 +1,22 @@
 pragma solidity ^0.4.18;
 
 import './math/SafeMath.sol';
-import "./FTXToken.sol";
 import "./ownership/Ownable.sol";
 import "./Pausable.sol";
-import "./HasNoTokens.sol";
 import "./FTXPrivatePresale.sol";
 import "./FTXPublicPresale.sol";
 
-contract FTXSale is Ownable, Pausable, HasNoTokens {
+contract FTXSale is Ownable, Pausable {
     using SafeMath for uint256;
 
     string public constant NAME = "FintruX token sale";
-    string public constant VERSION = "0.6";
+    string public constant VERSION = "0.7";
 
-    FTXToken token;
     FTXPrivatePresale privatePresale;
     FTXPublicPresale publicPresale;
 
     // this multi-sig address will be replaced on production:
-    address public constant FINTRUX_WALLET = 0xA2d0B62c3d3cBee17f116828ca895Ac5a115bA4a;
+    address public constant FINTRUX_WALLET = 0x7c05c62ae365E88221B62cA41D6eb087fDAa2020;
 
     uint256 public startDate = 1518022800;                                          // Feb 7, 2017 5:00 PM UTC
     uint256 public endDate = 1519837200;                                            // Feb 28, 2017 5:00 PM UTC
@@ -44,7 +41,6 @@ contract FTXSale is Ownable, Pausable, HasNoTokens {
     uint256 public constant MIN_PURCHASE = 10**17;                                  // minimum purchase is 0.1 ETH to make the gas worthwhile
     uint256 public constant MIN_FTX_PURCHASE = 150 * 10**18;                        // minimum token purchase is 150 or 0.1 ETH
 
-    uint256 public presaleWeiRaised = 0;                                            // amount of Ether raised in presales in wei
     uint256 public presaleTokensSold = 0;                                           // number of FTX tokens sold in presales
 
     bool public isFinalized = false;                                                // it becomes true when token sale is completed
@@ -57,15 +53,6 @@ contract FTXSale is Ownable, Pausable, HasNoTokens {
 
     /** this becomes true when purchaser has been refunded */
     mapping (address => bool) public purchaserRefunded;
-
-    /** this becomes true when crowdsale has distributed purchased tokens with bonus for each purchaser address */
-    mapping (address => bool) public tokenDistributed;
-
-    /** the amount of leftover tokens this crowdsale has distributed for each purchaser address */
-    mapping (address => uint256) public leftoverAmountOf;
-
-    /** this becomes true when crowdsale has distributed leftover tokens for each purchaser address */
-    mapping (address => bool) public leftoverDistributed;
 
     address[] public purchasers;                                                     // purchaser wallets
 
@@ -90,20 +77,19 @@ contract FTXSale is Ownable, Pausable, HasNoTokens {
     /*
         Constructor to initialize everything.
     */
-    function FTXSale (address _privatePresale, address _publicPresale, address _token, address _owner) public {
+    function FTXSale (address _privatePresale, address _publicPresale, address _owner) public {
         if (_owner == address(0)) {
             _owner = msg.sender;
         }
-        require(_token != address(0));
         require(_privatePresale != address(0));
         require(_publicPresale != address(0));
         require(_owner != address(0));                
-        token = FTXToken(_token);
         owner = _owner;                                                             // default owner
  
         privatePresale = FTXPrivatePresale(_privatePresale);
         publicPresale = FTXPublicPresale(_publicPresale);
-        presaleTokensSold = publicPresale.presaleTokensSold();                      // initialize to number of FTX sold in all presales
+        // initialize to number of FTX sold in all presales
+        presaleTokensSold = publicPresale.privatePresaleTokensSold() + publicPresale.publicPresaleTokensSold();
         purchaserCount = publicPresale.purchaserCount();                            // initialize to all presales purchaser count
         tokensSold = presaleTokensSold;                                             // initialize to FTX sold in all presales
         numWhitelisted = publicPresale.numWhitelisted();
@@ -169,17 +155,17 @@ contract FTXSale is Ownable, Pausable, HasNoTokens {
 
             // if there are tokens available at that tier and still have leftover ETH
             if (ts.tokensSold < ts.tokensAvail && amountTransfered > 0) {
-                tokensToBuy = amountTransfered * ts.tokenPrice;
+                tokensToBuy = SafeMath.cei(amountTransfered * ts.tokenPrice, 10**18);   // Round up to the nearest token
                 if (ts.tokensSold + tokensToBuy > ts.tokensAvail) {
                     tokensToBuy = ts.tokensAvail - ts.tokensSold;
                 }
-                currentRate = ts.tokenPrice;                                        // current rate FTX per ETH
-                tokens += tokensToBuy;                                              // acumulated tokens to buy
+                currentRate = ts.tokenPrice;                                            // current rate FTX per ETH
+                tokens += tokensToBuy;                                                  // acumulated tokens to buy
                 ts.tokensSold += tokensToBuy;
                 amountTransfered -= tokensToBuy / ts.tokenPrice;
             }
         }
-        processSale(tokens, currentRate);                                          // process crowdsale at determined price
+        processSale(tokens, currentRate);                                               // process crowdsale at determined price
     }
 
     /*
@@ -247,13 +233,6 @@ contract FTXSale is Ownable, Pausable, HasNoTokens {
     }
 
     /*
-        return true if there is significant unsold tokens remaining.
-    */
-    function hasLeftoverTokens() public view returns (bool) {
-        return ((TOKEN_HARD_CAP - tokensSold) / purchaserCount) > MIN_FTX_PURCHASE;     // Too small don't care
-    }
-
-    /*
         Determine if the minimum goal in wei has been reached.
     */
     function isMinimumGoalReached() public view returns (bool) {
@@ -263,13 +242,15 @@ contract FTXSale is Ownable, Pausable, HasNoTokens {
     /*
         Called after crowdsale ends, to do some extra finalization work.
     */
-    function finalize() public onlyOwner {
+    function finalize() payable public onlyOwner {
         require(!isFinalized);                                                      // do nothing if finalized
         require(hasEnded());                                                        // crowdsale must have ended
         isFinalized = true;                                                         // mark as finalized
         if (isMinimumGoalReached()) {                                               // goal reach or recovery time passed
             FINTRUX_WALLET.transfer(this.balance);                                  // transfer to FintruX multisig wallet
             FundsTransferred();                                                     // signal the event for communication
+        } else {
+            require(msg.value == publicPresale.weiRaised());                        // goal not reach need enough eth to handle refund of presale
         }
         Finalized();                                                                // signal the event for communication
     }
@@ -285,86 +266,6 @@ contract FTXSale is Ownable, Pausable, HasNoTokens {
         // transfer must be called only after purchasedAmountOf is updated to prevent reentrancy attack.
         msg.sender.transfer(depositedValue);                                        // refund all ETH
         Refunded(msg.sender, depositedValue);                                       // signal the event for communication
-    }
-
-    /*
-    // Instead of looping here, do the for loop outside in Dapp is better pratice.
-    function distributeTokensForAll() public onlyOwner {
-        for (uint256 i = 0; i < purchasers.length; i++) {
-            distributeTokensFor(purchasers[i]);
-        }
-    }
-    */
-
-    /*
-        Distribute tokens purchased with bonus.
-    */
-    function distributeTokensFor(address purchaser) external onlyOwner {
-        require(isFinalized);
-        require(isMinimumGoalReached());
-        require(!tokenDistributed[purchaser]);
-        require(token.balanceOf(address(this)) > 0);                  // must not be empty
-        tokenDistributed[purchaser] = true;                           // token + bonus distributed
-        uint256 tokenPurchased = tokenAmountOf[purchaser] + privatePresale.tokenAmountOf(purchaser) + publicPresale.tokenAmountOf(purchaser);
-        purchaserDistCount++;                                         // one more purchaser received token + bonus
-        // transfer the purchased tokens + bonus
-        token.transfer(purchaser, tokenPurchased);
-        // signal the event for communication
-        TokenDistributed(purchaser, tokenPurchased);
-
-        // clean up the account if all purchasers have received tokens + bonus and there is no unsold tokens
-        if (purchaserDistCount >= purchaserCount && !hasLeftoverTokens()) {
-            uint256 remaining = token.balanceOf(address(this));
-            if (remaining >= token.token4Gas()) {
-                token.transfer(owner, token.balanceOf(address(this)));  // Balance everything out
-            }
-            else {
-                // odd case that the token transfer limit is larger than tiny left over, what to do ?
-            }
-        }
-    }
-
-    /*
-        Distribute leftover tokens one time.
-    */
-    function distributeLeftover(address purchaser) external onlyOwner {
-        require(isFinalized);
-        require(isMinimumGoalReached());
-        require(purchaserDistCount >= purchaserCount);                    // only when all purchased token + bonus is distributed
-        require(!leftoverDistributed[purchaser]);                         // distribute once only
-        require(token.balanceOf(address(this)) > 0);                      // must not be empty
-
-        uint256 allocatedLeftover = 0;
-        uint256 remaining = token.balanceOf(address(this));
-        uint256 tokenPurchased = tokenAmountOf[purchaser] + privatePresale.tokenAmountOf(purchaser) + publicPresale.tokenAmountOf(purchaser);
-        // Send leftover tokens out proporationally if not fully sold.
-        if (hasLeftoverTokens()) {
-            allocatedLeftover = (tokenPurchased * (TOKEN_HARD_CAP - tokensSold)) / tokensSold;
-            if (remaining < allocatedLeftover) {                           // In case not enough remaining
-                allocatedLeftover = remaining;
-            }
-            uint256 minTokenToTransfer = token.token4Gas();                
-            if (allocatedLeftover < minTokenToTransfer) {                  // too small, given them zero
-                allocatedLeftover = 0;
-            }
-            leftoverAmountOf[purchaser] = allocatedLeftover;  
-            leftoverDistributed[purchaser] = true;                         // leftover distributed
-            purchaserLeftoverDistCount++;                                  // purchaser leftover portion processed
-            remaining -= allocatedLeftover;   
-            if (allocatedLeftover > 0) {
-                token.transfer(purchaser, allocatedLeftover);                  // Finally transfer the leftover tokens
-                LeftoverTokenDistributed(purchaser, allocatedLeftover);        // signal the event for communication
-            }                            
-        }
-        if (!hasLeftoverTokens() || remaining < MIN_FTX_PURCHASE || purchaserLeftoverDistCount >= purchaserCount) {
-            if (remaining >= token.token4Gas()) {
-                token.transfer(owner, remaining);                              // Balance everything out
-                LeftoverTokenDistributed(owner,remaining);                     // signal the event for communication
-            }
-            else {
-                // odd case of left over < allowed token transfer minimum, what to do ?
-            }
-        }
     }
 
     /*
@@ -406,5 +307,9 @@ contract FTXSale is Ownable, Pausable, HasNoTokens {
         } else {
             return([6,startDate,endDate]);
         }
+    }
+    
+    function getPurchaserLength() public constant returns(uint256 length) {
+        return purchasers.length;
     }
 }

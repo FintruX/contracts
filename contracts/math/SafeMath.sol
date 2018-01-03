@@ -33,4 +33,8 @@ library SafeMath {
     assert(c >= a);
     return c;
   }
+
+  function cei(uint256 a, uint256 b) internal pure returns (uint256) {
+    return ((a + b - 1) / b) * b;
+  }
 }

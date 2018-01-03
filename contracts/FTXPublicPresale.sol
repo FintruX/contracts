@@ -10,12 +10,12 @@ contract FTXPublicPresale is Ownable, Pausable, HasNoTokens {
     using SafeMath for uint256;
 
     string public constant NAME = "FintruX PublicPresale";
-    string public constant VERSION = "0.6";
+    string public constant VERSION = "0.7";
 
     FTXPrivatePresale privatePresale;
 
     // this multi-sig address will be replaced on production:
-    address public constant FINTRUX_WALLET = 0xA2d0B62c3d3cBee17f116828ca895Ac5a115bA4a;
+    address public constant FINTRUX_WALLET = 0x7c05c62ae365E88221B62cA41D6eb087fDAa2020;
 
     uint256 public publicStartDate = 1515344400;                                    // January 7, 2018 5:00 PM UTC
     uint256 public publicEndDate = 1516554000;                                      // January 21, 2018 5:00 PM UTC
@@ -35,9 +35,9 @@ contract FTXPublicPresale is Ownable, Pausable, HasNoTokens {
     uint256 public constant MIN_PURCHASE = 0.1 * 10**18;                            // minimum purchase is 0.1 ETH to make the gas worthwhile
     uint256 public constant MIN_FTX_PURCHASE = 150 * 10**18;                        // minimum token purchase is 150 or 0.1 ETH
 
-    uint256 public presaleWeiRaised = 0;                                            // amount of Ether raised in presales in wei
-    uint256 public presaleTokensSold = 0;                                           // number of FTX tokens sold in presales
-    uint256 public privatePresaleFTXSold = 0;                                       // number of FTX sold in private presale
+    uint256 public publicPresaleWeiRaised = 0;                                      // amount of Ether raised in public presales in wei
+    uint256 public publicPresaleTokensSold = 0;                                     // number of FTX tokens sold in public presales
+    uint256 public privatePresaleTokensSold = 0;                                    // number of FTX sold in private presale
 
     bool public isFinalized = false;                                                // it becomes true when token sale is completed
     bool public publicSoftCapReached = false;                                       // it becomes true when public softcap is reached
@@ -76,10 +76,9 @@ contract FTXPublicPresale is Ownable, Pausable, HasNoTokens {
         require(_owner != address(0));
         owner = _owner;                                                             // default owner
         privatePresale = FTXPrivatePresale(_privatePresale);
-        privatePresaleFTXSold = privatePresale.tokensSold();                        // number of FTX sold in private presale
-        presaleTokensSold = privatePresaleFTXSold;                                  // initialize to FTX sold in private presale
+        privatePresaleTokensSold = privatePresale.tokensSold();                     // number of FTX sold in private presale
         purchaserCount = privatePresale.purchaserCount();                           // initialize to all presales purchaser count
-        tokensSold = privatePresaleFTXSold;                                         // initialize to FTX sold in private presale
+        tokensSold = privatePresaleTokensSold;                                      // initialize to FTX sold in private presale
         numWhitelisted = privatePresale.numWhitelisted();
     }
     
@@ -123,33 +122,34 @@ contract FTXPublicPresale is Ownable, Pausable, HasNoTokens {
         uint256 tokens = 0;
         // still under soft cap
         if (!publicSoftCapReached) {
-            tokens = msg.value * PRESALE_RATE;                                      // 1 ETH for 1,100 FTX
-            if (presaleTokensSold + tokens > PRESALE_TOKEN_SOFT_CAP) {              // get less if over softcap
-                uint256 availablePresaleTokens = PRESALE_TOKEN_SOFT_CAP - presaleTokensSold;
-                uint256 softCapTokens = (msg.value - (availablePresaleTokens / PRESALE_RATE)) * SOFTCAP_RATE;
-                tokens = availablePresaleTokens + softCapTokens;
-                processSale(tokens, SOFTCAP_RATE);                                  // process presale at 1 ETH to 1,050 FTX
+            tokens = SafeMath.cei(msg.value * PRESALE_RATE, 10**18);                // 1 ETH for 1,650 FTX
+            if (publicPresaleTokensSold + tokens > PRESALE_TOKEN_SOFT_CAP) {        // get less if over softcap
+                uint256 availablePresaleTokens = PRESALE_TOKEN_SOFT_CAP - publicPresaleTokensSold;  // tokens at PRESALE_RATE
+                uint256 availablePresaleEth = availablePresaleTokens / PRESALE_RATE;                // Eth equivalent of
+                uint256 softCapEth = msg.value - availablePresaleEth;                               // Remaining Eth at SOFTCAP_RATE
+                uint256 softCapTokens = SafeMath.cei(softCapEth * SOFTCAP_RATE, 10**18);            // Remaining tokens
                 publicSoftCapReached = true;                                        // public soft cap has been reached
                 publicEndDate = now + softcapDuration;                              // shorten the presale cycle
+                if (availablePresaleTokens > 0) {                                   // just in case
+                    processSale(availablePresaleEth, availablePresaleTokens, PRESALE_RATE);              // process presale at 1 ETH to 1,650 FTX
+                }
+                processSale(softCapEth, softCapTokens, SOFTCAP_RATE);                           // process presale at 1 ETH to 1,575 FTX
                 SoftCapReached();                                                   // signal the event for communication
             } else {
-                processSale(tokens, PRESALE_RATE);                                  // process presale @PRESALE_RATE
+                processSale(msg.value, tokens, PRESALE_RATE);                                  // process presale @PRESALE_RATE
             }
         } else {
             tokens = msg.value * SOFTCAP_RATE;                                      // 1 ETH to 1,575 FTX
-            processSale(tokens, SOFTCAP_RATE);                                      // process presale at 1 ETH to 1,575 FTX
+            processSale(msg.value, tokens, SOFTCAP_RATE);                                      // process presale at 1 ETH to 1,575 FTX
         }
-        presaleTokensSold += tokens;                                                // update presale ETH raised
-        presaleWeiRaised += msg.value;                                              // update presale FTX sold
     }
 
     /*
         process sale at determined price.
     */
-    function processSale(uint256 ftx, uint256 ftxRate) internal {
+    function processSale(uint256 paidValue, uint256 ftx, uint256 ftxRate) internal {
         uint256 ftxOver = 0;
         uint256 excessEthInWei = 0;
-        uint256 paidValue = msg.value;
 
         if (tokensSold + ftx > TOKEN_HARD_CAP) {                                    // if maximum is exceeded
             ftxOver = tokensSold + ftx - TOKEN_HARD_CAP;                            // find overage
@@ -163,8 +163,10 @@ contract FTXPublicPresale is Ownable, Pausable, HasNoTokens {
         }
         tokenAmountOf[msg.sender] = tokenAmountOf[msg.sender].add(ftx);                 // record FTX on purchaser account
         purchasedAmountOf[msg.sender] = purchasedAmountOf[msg.sender].add(paidValue);   // record ETH paid
-        weiRaised += paidValue;                                                         // total ETH raised
-        tokensSold += ftx;                                                              // total FTX sold
+        publicPresaleWeiRaised += paidValue;                                            // update public presale ETH raised
+        publicPresaleTokensSold += ftx;                                                 // update public presale FTX sold
+        weiRaised += paidValue;                                                         // update total ETH raised
+        tokensSold += ftx;                                                              // update total FTX sold
         TokenPurchase(msg.sender, paidValue, ftx);                                      // signal the event for communication
         // transfer must be done at the end after all states are updated to prevent reentrancy attack.
         if (excessEthInWei > 0) {
@@ -264,5 +266,9 @@ contract FTXPublicPresale is Ownable, Pausable, HasNoTokens {
         } else {
             return([4,publicStartDate,publicEndDate]);
         }
+    }
+
+    function getPurchaserLength() public constant returns(uint256 length) {
+        return purchasers.length;
     }
 }

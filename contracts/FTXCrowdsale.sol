@@ -38,6 +38,7 @@ contract FTXCrowdsale is Ownable, Pausable, HasNoTokens {
     uint256 public weiRaised = 0;                                                   // total amount of Ether raised in wei
     uint256 public purchaserCount = 0;                                              // total number of purchasers purchased FTX
     uint256 public purchaserDistCount = 0;                                          // total number of purchasers received purchased FTX + bonus
+    uint256 public purchaserLeftoverDistCount = 0;                                  // total number of purchasers received(may be zero) leftover portion
     uint256 public tokensSold = 0;                                                  // total number of FTX tokens sold
     uint256 public NumWhitelisted = 0;                                              // total number whitelisted
 
@@ -361,7 +362,10 @@ endDate = newEndDate;
 
         // clean up the account if all purchasers have received tokens + bonus and there is no unsold tokens
         if (purchaserDistCount >= purchaserCount && !hasLeftoverTokens()) {
-            token.transfer(owner, token.balanceOf(address(this)));  // Balance everything out
+            uint256 remaining = token.balanceOf(address(this));
+            if (remaining >= token.token4Gas()) {
+                token.transfer(owner, token.balanceOf(address(this)));  // Balance everything out
+            }
         }
     }
 
@@ -371,6 +375,7 @@ endDate = newEndDate;
     function distributeLeftover(address purchaser) external onlyOwner {
         require(isFinalized);
         require(isMinimumGoalReached());
+        require(purchaserDistCount >= purchaserCount);                    // only when all purchased token + bonus is distributed
         require(!leftoverDistributed[purchaser]);                         // distribute once only
         require(token.balanceOf(address(this)) > 0);                      // must not be empty
 
@@ -382,13 +387,20 @@ endDate = newEndDate;
             if (remaining < allocatedLeftover) {                           // In case not enough remaining
                 allocatedLeftover = remaining;
             }
+            uint256 minTokenToTransfer = token.token4Gas();
+            if (allocatedLeftover < minTokenToTransfer) {
+                allocatedLeftover = 0;
+            }
             leftoverAmountOf[purchaser] = allocatedLeftover;  
             leftoverDistributed[purchaser] = true;                         // leftover distributed
-            remaining -= allocatedLeftover;                               
-            token.transfer(purchaser, allocatedLeftover);                  // Finally transfer the leftover tokens
-            LeftoverTokenDistributed(purchaser, allocatedLeftover);        // signal the event for communication
+            purchaserLeftoverDistCount++;                                  // purchaser leftover portion processed
+            remaining -= allocatedLeftover;   
+            if (allocatedLeftover > 0) {
+                token.transfer(purchaser, allocatedLeftover);                  // Finally transfer the leftover tokens
+                LeftoverTokenDistributed(purchaser, allocatedLeftover);        // signal the event for communication
+            }                            
         }
-        if (!hasLeftoverTokens() || remaining < MIN_FTX_PURCHASE) {
+        if (!hasLeftoverTokens() || remaining < MIN_FTX_PURCHASE || purchaserLeftoverDistCount >= purchaserCount) {
             token.transfer(owner, remaining);                              // Balance everything out
             LeftoverTokenDistributed(owner,remaining);                     // signal the event for communication
         }
@@ -407,7 +419,7 @@ endDate = newEndDate;
     function getTier() public view returns (uint256) {
         uint256 tier = 1;                                                           // Assume presale top tier discount
         if (now >= privateStartDate) {      
-            if (isPrivatePresale() || isPublicPresale()) {
+            if (now < publicEndDate && !privateSoftCapReached) {
                 if (getSoftCapReached()) {
                     tier = 2;                                                       // tier 2 discount
                 }
@@ -450,7 +462,7 @@ endDate = newEndDate;
                 return([4,startDate,endDate]);
             else    
                 return([2,publicStartDate,publicEndDate]);
-        } else if (now <= publicEndDate) {
+        } else if (now <= publicEndDate && !privateSoftCapReached) {
             return([3,publicStartDate,publicEndDate]);
         } else if (now < startDate)
             return([4,startDate,endDate]);
