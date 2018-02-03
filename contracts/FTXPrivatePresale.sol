@@ -2,14 +2,13 @@ pragma solidity ^0.4.18;
 
 import './math/SafeMath.sol';
 import "./ownership/Ownable.sol";
-import "./Pausable.sol";
 import "./HasNoTokens.sol";
 
-contract FTXPrivatePresale is Ownable, Pausable, HasNoTokens {
+contract FTXPrivatePresale is Ownable, HasNoTokens {
     using SafeMath for uint256;
 
     string public constant NAME = "FintruX PrivatePresale";
-    string public constant VERSION = "0.6";
+    string public constant VERSION = "0.7";
 
     uint256 public privateStartDate = 1513270800;                                   // Dec 14, 2017 5:00 PM UTC
     uint256 public privateEndDate = 1515258000;                                     // Jan 6, 2018 5:00 PM UTC
@@ -26,7 +25,8 @@ contract FTXPrivatePresale is Ownable, Pausable, HasNoTokens {
     /** the amount of tokens this crowdsale has credited for each purchaser address */
     mapping (address => uint256) public tokenAmountOf;
 
-    address[] public purchasers;                                                     // purchaser wallets
+    address[] public purchasers;                                                    // purchaser wallets
+    mapping (address => uint256) private purchaserIdx;                              // purchaser position in array
 
     // list of addresses that can purchase
     mapping (address => bool) public whitelist;
@@ -97,6 +97,7 @@ contract FTXPrivatePresale is Ownable, Pausable, HasNoTokens {
         if (tokenAmountOf[buyer] == 0) {
             purchaserCount++;                                                       // count new purchasers
             purchasers.push(buyer);
+            purchaserIdx[buyer] = purchasers.length - 1;                            // memorize the location in case of cancellation
         }
         tokenAmountOf[buyer] = tokenAmountOf[buyer].add(ftx);                       // record FTX on purchaser account
         // do not record ETH/Fiat paid:
@@ -115,11 +116,22 @@ contract FTXPrivatePresale is Ownable, Pausable, HasNoTokens {
         processSale(buyer, ftx);                                                    // do private presale in fiat/ETH
     }
 
+    /*
+        In case of error token input.
+    */
     function cancelTokenPurchase(address buyer) external onlyOwner {
         require(tokenAmountOf[buyer] > 0);
         uint256 ftx = tokenAmountOf[buyer];
-        delete tokenAmountOf[buyer];
-        TokenPurchaseCancelled(buyer, 0, ftx);                                       // signal the event for communication
+        uint256 idx = purchaserIdx[buyer];                                          // position of buyer in the list(to be removed)
+        address lastBuyer = purchasers[purchaserCount - 1];                         // last buyer in the list
+        purchasers[idx] = lastBuyer;                                                // move last buyer to the slot
+        purchaserIdx[lastBuyer] = idx;                                              // revise position of last buyer
+        delete purchaserIdx[buyer];                                                 // remove buyer from position mapping
+        delete tokenAmountOf[buyer];                                                // remove token sold mapping
+        purchaserCount--;                                                           // reduce purchase count
+        tokensSold -= ftx;                                                          // reduce token sold by cancelled amount
+        purchasers.length--;                                                        // remove last entry in array
+        TokenPurchaseCancelled(buyer, 0, ftx);                                      // signal the event for communication
     }
     /*
         Check to see if this is private presale.
@@ -158,5 +170,9 @@ contract FTXPrivatePresale is Ownable, Pausable, HasNoTokens {
     */
     function isSaleActive() public view returns (bool) {
         return isPrivatePresale() && !hasSoldOut();                                   // return true if sales is on
+    }
+
+    function getPurchaserLength() public constant returns(uint256 length) {
+        return purchasers.length;
     }
 }

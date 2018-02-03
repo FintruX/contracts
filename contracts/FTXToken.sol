@@ -8,7 +8,7 @@ contract FTXToken is StandardToken, Ownable {
     /* metadata */
     string public constant NAME = "Fincoin";
     string public constant SYMBOL = "FTX";
-    string public constant VERSION = "0.5";
+    string public constant VERSION = "0.8";
     uint8 public constant DECIMALS = 18;
 
     /* all accounts in wei */
@@ -31,11 +31,6 @@ contract FTXToken is StandardToken, Ownable {
     uint256 public gas4Token = 80000*0.6*10**9;
     // minimum wei required in an account to perform an action (avg gas price 4Gwei * avg gas limit 80000).
     uint256 public minGas4Accts = 80000*4*10**9;
-    
-    // list of addresses that has transfer restriction.
-    mapping (address => bool) public accreditedList;
-    uint256 public NumOfAccredited = 0;
-    uint256 public ipoDate = 1703543589;                                          // Assume many years for now but can change.
 
     event Withdraw(address indexed from, address indexed to, uint256 value);
     event GasRebateFailed(address indexed to, uint256 value);
@@ -74,53 +69,20 @@ contract FTXToken is StandardToken, Ownable {
         return true;
     }
     
-    /*
-        Allow changes to IPO date.
-    */
-    function setIpoDate(uint256 newIpoDate) public onlyOwner {
-        ipoDate = newIpoDate;
-    }
-
-    /*
-        add the ether address to accredited list to put in transfer restrction.
-    */
-    function addToAccreditedList(address _addr) external onlyOwner {
-        require(_addr != address(0));
-        require(!accreditedList[_addr]);
-
-        accreditedList[_addr] = true;
-        NumOfAccredited += 1;
-    }
-
-    /*
-        remove the ether address from accredited list to remove transfer restriction.
-    */
-    function delFrAccreditedList(address _addr) external onlyOwner {
-        require(accreditedList[_addr]);
-
-        delete accreditedList[_addr];
-        NumOfAccredited -= 1;
-    }
-    
-    // return true if buyer is an accredited investor from United States.
-    function isAccreditedlisted(address buyer) public view returns (bool) {
-        return accreditedList[buyer];
-    }
-
     /* When necessary, adjust minimum FTX to transfer to make the gas worthwhile */
-    function setToken4Gas(uint newFTXAmount) public onlyOwner {
+    function setToken4Gas(uint256 newFTXAmount) public onlyOwner {
         require(newFTXAmount > 0);                                                  // Upper bound is not necessary.
         token4Gas = newFTXAmount;
     }
 
     /* Only when necessary such as gas price change, adjust the gas to be reimbursed on every transfer when sender account below minimum */
-    function setGas4Token(uint newGasInWei) public onlyOwner {
+    function setGas4Token(uint256 newGasInWei) public onlyOwner {
         require(newGasInWei > 0 && newGasInWei <= 840000*10**9);            // must be less than a reasonable gas value
         gas4Token = newGasInWei;
     }
 
     /* When necessary, adjust the minimum wei required in an account before an reimibusement of fee is triggerred */
-    function setMinGas4Accts(uint minBalanceInWei) public onlyOwner {
+    function setMinGas4Accts(uint256 minBalanceInWei) public onlyOwner {
         require(minBalanceInWei > 0 && minBalanceInWei <= 840000*10**9);    // must be less than a reasonable gas value
         minGas4Accts = minBalanceInWei;
     }
@@ -143,8 +105,6 @@ contract FTXToken is StandardToken, Ownable {
     function canTransferTokens() internal view returns (bool) {
         if (msg.sender == TEAM_RESERVE) {
             return now >= VESTING_DATE;
-        } else if (accreditedList[msg.sender]) {
-            return now >= ipoDate;
         } else {
             return true;
         }

@@ -6,11 +6,14 @@ import "./Pausable.sol";
 import "./FTXPrivatePresale.sol";
 import "./FTXPublicPresale.sol";
 
+/*
+    Minimum goal aleady reached.
+*/
 contract FTXSale is Ownable, Pausable {
     using SafeMath for uint256;
 
     string public constant NAME = "FintruX token sale";
-    string public constant VERSION = "0.7";
+    string public constant VERSION = "0.8";
 
     FTXPrivatePresale privatePresale;
     FTXPublicPresale publicPresale;
@@ -21,7 +24,11 @@ contract FTXSale is Ownable, Pausable {
     uint256 public startDate = 1518022800;                                          // Feb 7, 2017 5:00 PM UTC
     uint256 public endDate = 1519837200;                                            // Feb 28, 2017 5:00 PM UTC
 
-	struct TokenDiscount {
+    uint256 public eth2usdRate = 1151;                                              // assume 1ETH = USD$1151 and expect update
+    uint256 public maxEthInWei = 1000*10**18;                                       // maximum wei per transaction allowed; 0 means no limit
+    uint256 public autoMaxEthInWei = 5*10**18;                                      // limit wei per transaction when MAXIMUM_CAP reach
+	
+    struct TokenDiscount {
 		uint256 tokensAvail;                                                        // total tokens available at this price
 		uint256 tokensSold;                                                         // tokens sold at this price
 		uint256 tokenPrice;                                                         // number of tokens per ETH
@@ -30,29 +37,28 @@ contract FTXSale is Ownable, Pausable {
 
     uint256 public weiRaised = 0;                                                   // total amount of Ether raised in wei
     uint256 public purchaserCount = 0;                                              // total number of purchasers purchased FTX
-    uint256 public purchaserDistCount = 0;                                          // total number of purchasers received purchased FTX + bonus
-    uint256 public purchaserLeftoverDistCount = 0;                                  // total number of purchasers received(may be zero) leftover portion
     uint256 public tokensSold = 0;                                                  // total number of FTX tokens sold
     uint256 public numWhitelisted = 0;                                              // total number whitelisted 
 
-    /* if the minimum funding goal in wei is not reached, purchasers may withdraw their funds, in tokens */
-    uint256 public constant MIN_FUNDING_GOAL = 8250000 * 10**18;
     uint256 public constant TOKEN_HARD_CAP = 75000000 * 10**18;                     // hardcap is 75% of all tokens
     uint256 public constant MIN_PURCHASE = 10**17;                                  // minimum purchase is 0.1 ETH to make the gas worthwhile
     uint256 public constant MIN_FTX_PURCHASE = 150 * 10**18;                        // minimum token purchase is 150 or 0.1 ETH
+    uint256 public constant MAXIMUM_CAP = 20000000 * 10**18;                        // lower maximum per transaction when USD$20M in wei is reached
+    uint256 public constant ABSOLUTE_CAP = 25000000 * 10**18;                       // absolute maximum raised USD$25M * wei
 
     uint256 public presaleTokensSold = 0;                                           // number of FTX tokens sold in presales
+    uint256 public presaleWeiRaised = 0;
 
     bool public isFinalized = false;                                                // it becomes true when token sale is completed
+    bool public maxCapReached = false;                                              // it becomes true when maximum-cap is reached
+    bool public targetCapReached = false;                                           // it becomes true when target-cap is reached
+    bool public absoluteCapReached = false;                                         // it becomes true when absolute-cap is reached
 
     /** the amount of ETH in wei each address has purchased in this crowdsale */
     mapping (address => uint256) public purchasedAmountOf;
 
     /** the amount of tokens this crowdsale has credited for each purchaser address */
     mapping (address => uint256) public tokenAmountOf;
-
-    /** this becomes true when purchaser has been refunded */
-    mapping (address => bool) public purchaserRefunded;
 
     address[] public purchasers;                                                     // purchaser wallets
 
@@ -69,10 +75,11 @@ contract FTXSale is Ownable, Pausable {
     event TokenPurchase(address indexed purchaser, uint256 value, uint256 amount);
     
     event Finalized();                                                              // event logging for token sale finalized
+    event MaximumCapReached();                                                      // event logging for maximum-cap reached
+    event TargetCapReached();                                                       // event logging for target-cap reached
+    event AbsoluteCapReached();                                                     // event logging for absolute-cap reached
     event FundsTransferred();                                                       // event logging for funds transfered to FintruX multi-sig wallet
     event Refunded(address indexed beneficiary, uint256 weiAmount);                 // event logging for each individual refunded amount
-    event TokenDistributed(address indexed purchaser, uint256 tokenAmt);            // event logging for each individual distributed token + bonus
-    event LeftoverTokenDistributed(address indexed purchaser, uint256 tokenAmt);    // event logging for each individual distributed leftover
 
     /*
         Constructor to initialize everything.
@@ -90,11 +97,13 @@ contract FTXSale is Ownable, Pausable {
         publicPresale = FTXPublicPresale(_publicPresale);
         // initialize to number of FTX sold in all presales
         presaleTokensSold = publicPresale.privatePresaleTokensSold() + publicPresale.publicPresaleTokensSold();
+        presaleWeiRaised = publicPresale.weiRaised();                               // initialize to wei raised in public presale
         purchaserCount = publicPresale.purchaserCount();                            // initialize to all presales purchaser count
         tokensSold = presaleTokensSold;                                             // initialize to FTX sold in all presales
+        weiRaised = presaleWeiRaised;                                               // initialize to wei raised in all presales
         numWhitelisted = publicPresale.numWhitelisted();
-        // bonus tiers
 
+        // bonus tiers
         tokenDiscount[0] = TokenDiscount(3150000 * 10**18, 0, 1575);                // 5.0% bonus
         tokenDiscount[1] = TokenDiscount(5383000 * 10**18, 0, 1538);                // 2.5% bonus
         tokenDiscount[2] = TokenDiscount(10626000 * 10**18, 0, 1518);               // 1.2% bonus
@@ -104,12 +113,45 @@ contract FTXSale is Ownable, Pausable {
         contractTimestamp = block.timestamp;
     }
     
+    /* 
+        Make sure FINTRUX_WALLET account is accessible before we accept ether from the public.
+    */
+    function verifyWalletAddress() external payable {
+        require(msg.sender == FINTRUX_WALLET);
+        require(msg.value > 0);
+        FINTRUX_WALLET.transfer(msg.value);
+    }
+
+    /*
+        Allow change to auto maximum purchase limit. 0 means no limit.
+    */
+    function setAutoMaxEthInWei(uint256 ethInWei) external onlyOwner {
+        require(ethInWei == 0 || ethInWei >= 10**18);
+        autoMaxEthInWei = ethInWei;
+    }
+
+    /*
+        Allow change to maximum purchase limit anyway in case of error input. 0 means no limit.
+    */
+    function setMaxEthInWei(uint256 ethInWei) external onlyOwner {
+        require(ethInWei == 0 || ethInWei >= 10**18);
+        maxEthInWei = ethInWei;
+    }
+
     /*
         Allow changes for crowdsale dates for testing as well as unforseen changes.
     */
-    function setDates(uint256 newStartDate, uint256 newEndDate) public onlyOwner {
+    function setDates(uint256 newStartDate, uint256 newEndDate) external onlyOwner {
         startDate = newStartDate;
         endDate = newEndDate;
+    }
+    
+    /*
+        Allow ETH to USD rate to be updated by DAPP. Only endDate is affected and endDate can be reset if error found.
+    */
+    function setETH2USD(uint256 _newRate) external onlyOwner {
+        require(_newRate >= 10 && _newRate <= 10000);                                // within reasonable rate.
+        eth2usdRate = _newRate;
     }
 
     /*
@@ -166,6 +208,20 @@ contract FTXSale is Ownable, Pausable {
             }
         }
         processSale(tokens, currentRate);                                               // process crowdsale at determined price
+
+        // Lower maximum per transaction when USD$20M in wei is reached.
+        if (!maxCapReached && weiRaised * eth2usdRate >= MAXIMUM_CAP) {
+            maxCapReached = true;                                                       // max-cap has been reached
+            maxEthInWei = autoMaxEthInWei;                                              // forced to preset limit
+            MaximumCapReached();                                                        // signal the event for communication
+        }
+
+        // End the sale immediately if absolute cap has been reached.
+        if (!absoluteCapReached && weiRaised * eth2usdRate >= ABSOLUTE_CAP) {
+            absoluteCapReached = true;                                                  // absolute-cap has been reached
+            endDate = now;                                                              // end the crowdsale cycle
+            AbsoluteCapReached();                                                       // signal the event for communication
+        }
     }
 
     /*
@@ -193,8 +249,8 @@ contract FTXSale is Ownable, Pausable {
         TokenPurchase(msg.sender, paidValue, ftx);                                      // signal the event for communication
         // transfer must be done at the end after all states are updated to prevent reentrancy attack.
         if (excessEthInWei > 0) {
-            msg.sender.transfer(excessEthInWei);                                       // refund overage ETH
-            Refunded(msg.sender, excessEthInWei);                                      // signal the event for communication
+            msg.sender.transfer(excessEthInWei);                                        // refund overage ETH
+            Refunded(msg.sender, excessEthInWei);                                       // signal the event for communication
         }
     }
 
@@ -207,7 +263,7 @@ contract FTXSale is Ownable, Pausable {
         require(!hasSoldOut());                                                     // stop if no more token to sell
         require(msg.value >= MIN_PURCHASE);                                         // stop if the purchase is too small
         require(isWhitelisted(msg.sender));                                         // no purchase unless whitelisted
-
+        require(maxEthInWei == 0 || msg.value <= maxEthInWei);                      // not exceeding per transaction limit set
         purchaseCrowdsale();                                                        // do crowdsale
     }
 
@@ -233,39 +289,15 @@ contract FTXSale is Ownable, Pausable {
     }
 
     /*
-        Determine if the minimum goal in wei has been reached.
-    */
-    function isMinimumGoalReached() public view returns (bool) {
-        return tokensSold >= MIN_FUNDING_GOAL;
-    }
-
-    /*
         Called after crowdsale ends, to do some extra finalization work.
     */
-    function finalize() payable public onlyOwner {
+    function finalize() public onlyOwner {
         require(!isFinalized);                                                      // do nothing if finalized
         require(hasEnded());                                                        // crowdsale must have ended
         isFinalized = true;                                                         // mark as finalized
-        if (isMinimumGoalReached()) {                                               // goal reach or recovery time passed
-            FINTRUX_WALLET.transfer(this.balance);                                  // transfer to FintruX multisig wallet
-            FundsTransferred();                                                     // signal the event for communication
-        } else {
-            require(msg.value == publicPresale.weiRaised());                        // goal not reach need enough eth to handle refund of presale
-        }
+        FINTRUX_WALLET.transfer(this.balance);                                      // transfer to FintruX multisig wallet
+        FundsTransferred();                                                         // signal the event for communication
         Finalized();                                                                // signal the event for communication
-    }
-
-    /*
-        purchaser requesting a refund if minimum goal not reached.
-    */
-    function claimRefund() external {
-        require(isFinalized && !isMinimumGoalReached());                            // cannot refund unless authorized
-        require(!purchaserRefunded[msg.sender]);                                    // can only done once which included all three
-        uint256 depositedValue = purchasedAmountOf[msg.sender] + publicPresale.purchasedAmountOf(msg.sender); // ETH to refund(both public presale and crowd sale)
-        purchaserRefunded[msg.sender] = true;                                       // assume all refunded(including prior sales), only this is trusted AFTER refund
-        // transfer must be called only after purchasedAmountOf is updated to prevent reentrancy attack.
-        msg.sender.transfer(depositedValue);                                        // refund all ETH
-        Refunded(msg.sender, depositedValue);                                       // signal the event for communication
     }
 
     /*
