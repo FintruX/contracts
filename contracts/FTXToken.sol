@@ -8,7 +8,7 @@ contract FTXToken is StandardToken, Ownable {
     /* metadata */
     string public constant NAME = "Fincoin";
     string public constant SYMBOL = "FTX";
-    string public constant VERSION = "0.8";
+    string public constant VERSION = "0.9";
     uint8 public constant DECIMALS = 18;
 
     /* all accounts in wei */
@@ -32,6 +32,9 @@ contract FTXToken is StandardToken, Ownable {
     // minimum wei required in an account to perform an action (avg gas price 4Gwei * avg gas limit 80000).
     uint256 public minGas4Accts = 80000*4*10**9;
 
+    bool public allowTransfers = false;
+    mapping (address => bool) public transferException;
+
     event Withdraw(address indexed from, address indexed to, uint256 value);
     event GasRebateFailed(address indexed to, uint256 value);
 
@@ -46,6 +49,7 @@ contract FTXToken is StandardToken, Ownable {
         balances[CROSS_RESERVE] = CROSS_RESERVE_FTX;
         balances[TEAM_RESERVE] = TEAM_RESERVE_FTX;
         owner = _owner;
+        transferException[owner] = true;
     }
 
     /**
@@ -98,15 +102,48 @@ contract FTXToken is StandardToken, Ownable {
         Withdraw(this, msg.sender, weiAmt);                                 // signal the event for communication only it is meaningful
     }
 
+    /*
+        allow everyone to start transferring tokens freely at the same moment. 
+    */
+    function setAllowTransfers(bool bAllowTransfers) external onlyOwner {
+        allowTransfers = bAllowTransfers;
+    }
+
+    /*
+        add the ether address to whitelist to enable transfer of token.
+    */
+    function addToException(address addr) external onlyOwner {
+        require(addr != address(0));
+        require(!isException(addr));
+
+        transferException[addr] = true;
+    }
+
+    /*
+        remove the ether address from whitelist in case a mistake was made.
+    */
+    function delFrException(address addr) external onlyOwner {
+        require(addr != address(0));
+        require(transferException[addr]);
+
+        delete transferException[addr];
+    }
+
+    /* return true when the address is in the exception list eg. token distribution contract and private sales addresses */
+    function isException(address addr) public view returns (bool) {
+        return transferException[addr];
+    }
+
     /* below are internal functions */
     /*
-        FintruX TEAM can only transfer tokens after vesting date of 1 year.
+        return true if token can be transferred.
     */
     function canTransferTokens() internal view returns (bool) {
-        if (msg.sender == TEAM_RESERVE) {
+        if (msg.sender == TEAM_RESERVE) {                                       // Vesting for FintruX TEAM is 1 year.
             return now >= VESTING_DATE;
         } else {
-            return true;
+            // if transfer is disabled, only allow special addresses to transfer tokens.
+            return allowTransfers || isException(msg.sender);
         }
     }
 
