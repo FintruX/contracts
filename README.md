@@ -20,3 +20,5 @@ Our FTX Tokens serve several key functions in our ecosystem:
 - Reward for providing information
 - Platform access
 - API license
+
+Learn more about our token at https://www.fintrux.com/token
