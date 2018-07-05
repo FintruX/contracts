@@ -1,4 +1,4 @@
-# Token and Smart contracts
+# Token and Crowdsale Smart Contracts
 Making unsecured loans highly secure. FintruX enables borrowers to create their own fully customized and simplified smart contracts on the #Ethereum #blockchain.
 
 ## Table of Contents
